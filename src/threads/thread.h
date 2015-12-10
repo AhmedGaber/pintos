@@ -29,6 +29,12 @@ typedef int tid_t;
 #define NICE_MAX 20
 #define NICE_MIN -20
 
+struct donation {
+  int donated_priority;
+  struct lock *loc;
+  struct list_elem delem;
+};
+
 /* A kernel thread or user process.
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -96,6 +102,8 @@ struct thread
     struct list_elem allelem;           /* List element for all threads list. */
     struct list_elem waitelem;          /* List element, stored in the wait_list. */
     int64_t sleep_endtick;              /* Used if the thread is sleep, the thread should awake after this tick */
+    struct list donaters;
+    struct lock *blocked_on;
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
@@ -130,6 +138,9 @@ tid_t thread_create (const char *name, int priority, thread_func *, void *);
 void thread_block (void);
 void thread_unblock (struct thread *);
 
+int get_priority(struct thread *);
+int get_max_priority (void);
+
 void thread_sleep_for_ticks (int64_t wake_tick);
 
 struct thread *thread_current (void);
@@ -150,6 +161,8 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+struct thread *priority_schedule_next_thread(void);
 
 /* For mlfqs */
 void calculate_priority (struct thread *t, void* aux);

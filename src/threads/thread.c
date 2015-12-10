@@ -320,6 +320,39 @@ thread_unblock (struct thread *t)
   list_push_back (&ready_list, &t->elem);
   t->status = THREAD_READY;
   intr_set_level (old_level);
+  if (!thread_mlfqs && thread_current () != idle_thread && thread_get_priority() < get_priority(t)) {
+    thread_yield();
+  }
+}
+
+int get_priority(struct thread *t) {
+  int max = t->priority;
+  struct list_elem *e;
+  for (e = list_begin (&t->donaters); e != list_end (&t->donaters);
+       e = list_next (e))
+    {
+      struct donation *d = list_entry (e, struct donation, delem);
+      if(max < d->donated_priority)
+        max = d->donated_priority;
+    }
+  return max;
+}
+
+int get_max_priority () {
+  int max = 0;
+  struct list_elem *e;
+  for (e = list_begin (&ready_list); e != list_end (&ready_list);
+       e = list_next (e))
+    {
+      struct thread *t = list_entry (e, struct thread, elem);
+      if(t->status == THREAD_READY) {
+        int pri = get_priority(t);
+        if(pri > max) {
+          max = pri;
+        }
+      }
+    }
+  return max;
 }
 
 /* Returns the name of the running thread. */
@@ -415,10 +448,9 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority)
 {
-  if(!thread_mlfqs){
-    // your code goes here ya mostafa.
-    thread_current ()->priority = new_priority;
-
+  thread_current ()->priority = new_priority;
+  if(!thread_mlfqs && (thread_get_priority() < get_max_priority())) {
+    thread_yield();
   }
 }
 
@@ -426,7 +458,7 @@ thread_set_priority (int new_priority)
 int
 thread_get_priority (void)
 {
-  return thread_current ()->priority;
+  return get_priority(thread_current ());
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -528,11 +560,11 @@ update_load_avg(void)
 int
 count_ready_threads(void)
 {
-	int counter = 0;
-	struct list_elem* e;
-		for (e = list_begin(&ready_list); e != list_end(&ready_list); e = list_next (e))
-		  counter ++;
-	return counter;
+	// int counter = 0;
+	// struct list_elem* e;
+	// 	for (e = list_begin(&ready_list); e != list_end(&ready_list); e = list_next (e))
+	// 	  counter ++;
+	return list_size(&ready_list);
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -620,6 +652,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+  list_init (&(t->donaters));
   t->sleep_endtick = 0;
 
 /* Set thread nice value. */
@@ -650,6 +683,24 @@ alloc_frame (struct thread *t, size_t size)
   return t->stack;
 }
 
+struct thread * priority_schedule_next_thread(){
+  int max = get_max_priority();
+  struct list_elem *e;
+  for (e = list_begin (&ready_list); e != list_end (&ready_list);
+       e = list_next (e))
+    {
+      struct thread *t = list_entry (e, struct thread, elem);
+      if(t->status == THREAD_READY) {
+        int pri = get_priority(t);
+        if(pri == max) {
+          list_remove (&t->elem);
+          return t;
+        }
+      }
+    }
+  return NULL;
+}
+
 /* Chooses and returns the next thread to be scheduled.  Should
    return a thread from the run queue, unless the run queue is
    empty.  (If the running thread can continue running, then it
@@ -660,8 +711,9 @@ next_thread_to_run (void)
 {
   if (list_empty (&ready_list))
     return idle_thread;
-  else
-    return list_entry (list_pop_front (&ready_list), struct thread, elem);
+  return priority_schedule_next_thread();
+  // else
+  //   return list_entry (list_pop_front (&ready_list), struct thread, elem);
 }
 
 /* Completes a thread switch by activating the new thread's page
