@@ -102,7 +102,7 @@ struct thread
     struct list_elem allelem;           /* List element for all threads list. */
     struct list_elem waitelem;          /* List element, stored in the wait_list. */
     int64_t sleep_endtick;              /* Used if the thread is sleep, the thread should awake after this tick */
-    struct list donaters;
+    struct list donors;
     struct lock *blocked_on;
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */

@@ -328,7 +328,7 @@ thread_unblock (struct thread *t)
 int get_priority(struct thread *t) {
   int max = t->priority;
   struct list_elem *e;
-  for (e = list_begin (&t->donaters); e != list_end (&t->donaters);
+  for (e = list_begin (&t->donors); e != list_end (&t->donors);
        e = list_next (e))
     {
       struct donation *d = list_entry (e, struct donation, delem);
@@ -448,7 +448,9 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority)
 {
+  enum intr_level old_level = intr_disable ();
   thread_current ()->priority = new_priority;
+  intr_set_level (old_level);
   if(!thread_mlfqs && (thread_get_priority() < get_max_priority())) {
     thread_yield();
   }
@@ -652,7 +654,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
-  list_init (&(t->donaters));
+  list_init (&(t->donors));
   t->sleep_endtick = 0;
 
 /* Set thread nice value. */
@@ -712,8 +714,6 @@ next_thread_to_run (void)
   if (list_empty (&ready_list))
     return idle_thread;
   return priority_schedule_next_thread();
-  // else
-  //   return list_entry (list_pop_front (&ready_list), struct thread, elem);
 }
 
 /* Completes a thread switch by activating the new thread's page

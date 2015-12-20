@@ -101,7 +101,8 @@ sema_try_down (struct semaphore *sema)
 
   return success;
 }
-struct thread * max_sema_waiter(struct semaphore *sema){
+
+struct thread * max_sema_waiter(struct semaphore *sema) {
   int max = -1;
   struct thread *to_remove = NULL;
   struct list_elem *e;
@@ -138,10 +139,14 @@ sema_up (struct semaphore *sema)
     struct thread *to_remove = max_sema_waiter(sema);
     sema->value++;
     thread_unblock (to_remove);
+    intr_set_level (old_level);
+    if (thread_mlfqs && get_priority(to_remove) > thread_get_priority()) {
+      thread_yield();
+    }
   } else {
     sema->value++;
+    intr_set_level (old_level);
   }
-  intr_set_level (old_level);
 }
 
 static void sema_test_helper (void *sema_);
@@ -220,17 +225,18 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
-  if(!thread_mlfqs){
+  if (!thread_mlfqs) {
     if(lock_try_acquire(lock)) {
       return;
     }
     priority_schedule(lock);
     thread_current()->blocked_on = lock;
-}
+  }
   sema_down (&lock->semaphore);
   lock->holder = thread_current ();
 }
-void priority_schedule(struct lock *lock){
+
+void priority_schedule (struct lock *lock) {
   struct thread *to;
   to = lock->holder;
   struct lock *tmp;
@@ -240,14 +246,14 @@ void priority_schedule(struct lock *lock){
     struct donation *obj = malloc(sizeof(struct donation));
     obj->donated_priority = pri;
     obj->loc = tmp;
-    list_push_back (&(to->donaters), &(obj->delem));
+    list_push_back (&(to->donors), &(obj->delem));
     tmp = to->blocked_on;
     to = to->blocked_on->holder;
   }
   struct donation *obj = malloc(sizeof(struct donation));
   obj->donated_priority = pri;
   obj->loc = tmp;
-  list_push_back (&(to->donaters), &(obj->delem));
+  list_push_back (&(to->donors), &(obj->delem));
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -285,11 +291,12 @@ lock_release (struct lock *lock)
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 }
-void priority_schedule_release(struct lock *lock){
+
+void priority_schedule_release (struct lock *lock) {
   struct thread *t = thread_current();
-  if(!list_empty(&t->donaters)) {
+  if(!list_empty(&t->donors)) {
     struct list_elem *e;
-    for (e = list_begin (&t->donaters); e != list_end (&t->donaters);
+    for (e = list_begin (&t->donors); e != list_end (&t->donors);
          e = list_next (e))
       {
         struct donation *d = list_entry (e, struct donation, delem);
@@ -365,7 +372,8 @@ cond_wait (struct condition *cond, struct lock *lock)
   sema_down (&waiter.semaphore);
   lock_acquire (lock);
 }
-struct semaphore_elem * max_semaphore_elem(struct condition *cond){
+
+struct semaphore_elem * max_semaphore_elem(struct condition *cond) {
   struct semaphore_elem *to_remove = NULL;
   int max = -1;
 

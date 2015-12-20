@@ -14,6 +14,7 @@ struct semaphore
 void sema_init (struct semaphore *, unsigned value);
 void sema_down (struct semaphore *);
 bool sema_try_down (struct semaphore *);
+struct thread * max_sema_waiter (struct semaphore *);
 void sema_up (struct semaphore *);
 void sema_self_test (void);
 
@@ -26,8 +27,10 @@ struct lock
 
 void lock_init (struct lock *);
 void lock_acquire (struct lock *);
+void priority_schedule (struct lock *);
 bool lock_try_acquire (struct lock *);
 void lock_release (struct lock *);
+void priority_schedule_release (struct lock *);
 bool lock_held_by_current_thread (const struct lock *);
 
 /* Condition variable. */
@@ -38,6 +41,7 @@ struct condition
 
 void cond_init (struct condition *);
 void cond_wait (struct condition *, struct lock *);
+struct semaphore_elem * max_semaphore_elem (struct condition *);
 void cond_signal (struct condition *, struct lock *);
 void cond_broadcast (struct condition *, struct lock *);
 
