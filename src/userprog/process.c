@@ -88,6 +88,11 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED)
 {
+
+  // Temporary implementation as the manual suggested.
+  while (1){ // an infinite loop
+
+  }
   return -1;
 }
 
