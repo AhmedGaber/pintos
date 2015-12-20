@@ -7,14 +7,20 @@
 #include "userprog/pagedir.h"
 #include <stdbool.h>
 #include "devices/shutdown.h"
+#include "userprog/process.h"
+
+typedef uint32_t pid_t;
 
 static void syscall_handler (struct intr_frame *);
 static int memread (void *src, void *des, size_t bytes);
 static int32_t get_user (const uint8_t *uaddr);
 static bool put_user (uint8_t *udst, uint8_t byte);
+static int fail_invalid_access(void);
 
 void sys_halt (void);
 void sys_exit (int status);
+pid_t sys_exec (const char *cmdline);
+bool sys_write(int fd, const void *buffer, unsigned size, int* ret);
 
 
 void
@@ -31,8 +37,7 @@ syscall_handler (struct intr_frame *f)
 
   // Check if the required memory is permmited.
   if (memread(f->esp, &syscall_number, sizeof(syscall_number)) == -1) {
-    thread_exit (); // invalid memory access attampet. Exit the user process.
-    return;
+    fail_invalid_access(); // invalid memory access attampet. Exit the user process.
   }
 
   printf ("DEBUG >>> System call number = %d.\n", syscall_number);
@@ -53,7 +58,7 @@ syscall_handler (struct intr_frame *f)
   {
     int exitcode;
     if (memread(f->esp + 4, &exitcode, sizeof(exitcode)) == -1)
-      thread_exit(); // invalid memory access attampet.
+      fail_invalid_access(); // invalid memory access attampet.
 
     sys_exit(exitcode);
     NOT_REACHED();
@@ -61,6 +66,16 @@ syscall_handler (struct intr_frame *f)
   }
 
   case SYS_EXEC:
+  {
+    void* cmdline;
+    if (memread(f->esp + 4, &cmdline, sizeof(cmdline)) == -1)
+      fail_invalid_access(); // invalid memory access attampet.
+
+    int out_code = sys_exec((const char*) cmdline);
+    f->eax = (uint32_t) out_code;
+    break;
+  }
+
   case SYS_WAIT:
   case SYS_CREATE:
   case SYS_REMOVE:
@@ -68,6 +83,21 @@ syscall_handler (struct intr_frame *f)
   case SYS_FILESIZE:
   case SYS_READ:
   case SYS_WRITE:
+  {
+    int fd, out_code;
+    const void *buffer;
+    unsigned size;
+
+    // TODO: write error messages
+    if (memread(f->esp + 4, &fd, 4) == -1) fail_invalid_access();
+    if (memread(f->esp + 8, &buffer, 4) == -1) fail_invalid_access();
+    if (memread(f->esp + 12, &size, 4) == -1) fail_invalid_access();
+
+    if (!sys_write(fd, buffer, size, &out_code)) fail_invalid_access();
+    f->eax = (uint32_t) out_code;
+    break;
+  }
+
   case SYS_SEEK:
   case SYS_TELL:
   case SYS_CLOSE:
@@ -75,11 +105,11 @@ syscall_handler (struct intr_frame *f)
   /* unhandled case */
   default:
     printf("ERROR >>> System call %d is unimplemented.\n", syscall_number);
-    thread_exit();
+    fail_invalid_access();
     break;
   }
 
-  thread_exit ();
+  fail_invalid_access ();
 }
 
 /*
@@ -130,11 +160,19 @@ memread (void *src, void *dst, size_t bytes)
   size_t i;
   for(i = 0; i < bytes; i++) {
     value = get_user(src + i);
-    if(value < 0)
+    if (value < 0)
       return -1; // invalid memory access attampet.
     *(char*)(dst + i) = value & 0xff; // from the manual.
   }
   return (int)bytes;
+}
+
+/**
+* Failier-handler function in case of invalid memory access attampet.
+*/
+static int fail_invalid_access(void) {
+  sys_exit (-1);
+  NOT_REACHED();
 }
 
 /**
@@ -152,10 +190,53 @@ sys_halt(void)
 * process’s parent waits for it, this is the status that will be returned.
 */
 void
-sys_exit(int status UNUSED)
+sys_exit(int status)
 {
   printf("%s: exit(%d)\n", thread_current()->name, status);
 
   // TODO
-  thread_exit();
+  fail_invalid_access();
+}
+
+/**
+* Runs the executable whose name is given in cmd line, passing any
+* given arguments, and returns the new process’s program id (pid).
+*/
+pid_t
+sys_exec(const char *cmdline)
+{
+   printf("DEBUG >>> Exec : %s\n.", cmdline);
+   while(true);
+
+   // cmdline is the address to the character buffer on user memory
+   // validation check is required
+   if (get_user((const uint8_t*) cmdline) == -1) {
+     fail_invalid_access();  // invalid memory access attampet
+     return -1;
+   }
+
+   tid_t child_tid = process_execute(cmdline);
+   return child_tid;
+}
+
+bool
+sys_write(int fd, const void *buffer, unsigned size, int* ret)
+{
+   // Validation
+   if (get_user((const uint8_t*) buffer) == -1) {
+     fail_invalid_access(); // invalid
+     return false;
+   }
+
+   // First, as of now, only implement fd=1 (stdout), it writes into the console.
+   if(fd == 1) {
+     putbuf(buffer, size);
+     *ret = size;
+     return true;
+   }
+   // TODO: implement the rest...
+   else {
+     printf("ERROR >>> sys_write unimplemented.\n");
+   }
+   return false;
 }
