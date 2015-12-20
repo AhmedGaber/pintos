@@ -20,7 +20,6 @@ void sys_exit (int status);
 void
 syscall_init (void)
 {
-  // this is a comment
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
