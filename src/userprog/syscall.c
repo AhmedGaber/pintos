@@ -8,6 +8,9 @@
 #include <stdbool.h>
 #include "devices/shutdown.h"
 #include "userprog/process.h"
+#include "filesys/filesys.h"
+#include "filesys/file.h"
+#include "threads/palloc.h"
 
 typedef uint32_t pid_t;
 
@@ -22,6 +25,8 @@ void sys_exit (int status);
 pid_t sys_exec (const char *cmdline);
 int sys_wait(pid_t pid);
 bool sys_write(int fd, const void *buffer, unsigned size, int* ret);
+bool sys_create(const char* filename, unsigned initial_size);
+bool sys_remove(const char* filename);
 
 
 void
@@ -89,7 +94,32 @@ syscall_handler (struct intr_frame *f)
   }
 
   case SYS_CREATE:
+  {
+    const char* filename;
+    unsigned initial_size;
+    bool out_code;
+    if (memread(f->esp + 4, &filename, sizeof(filename)) == -1)
+      fail_invalid_access(); // invalid memory access attampet.
+    if (memread(f->esp + 8, &initial_size, sizeof(initial_size)) == -1)
+      fail_invalid_access(); // invalid memory access attampet.
+
+    out_code = sys_create(filename, initial_size);
+    f->eax = out_code;
+    break;
+  }
+
   case SYS_REMOVE:
+  {
+    const char* filename;
+    bool out_code;
+    if (memread(f->esp + 4, &filename, sizeof(filename)) == -1)
+      fail_invalid_access(); // invalid memory access attampet.
+
+    out_code = sys_remove(filename);
+    f->eax = out_code;
+    break;
+  }
+
   case SYS_OPEN:
   case SYS_FILESIZE:
   case SYS_READ:
@@ -265,4 +295,34 @@ sys_write(int fd, const void *buffer, unsigned size, int* ret)
      printf("ERROR >>> sys_write unimplemented.\n");
    }
    return false;
+}
+
+/**
+* Creates a new file called file initially initial size bytes in size.
+* Returns true if successful, false otherwise.
+*/
+bool
+sys_create(const char* filename, unsigned initial_size)
+{
+  bool out_code;
+  if (get_user((const uint8_t*) filename) == -1) {  //validation
+    return fail_invalid_access();
+  }
+  out_code = filesys_create(filename, initial_size);
+  return out_code;
+}
+
+/**
+* Deletes the file called file. Returns true if successful, false otherwise.
+*/
+bool
+sys_remove(const char* filename)
+{
+  bool out_code;
+  if (get_user((const uint8_t*) filename) == -1) {  //validation
+    return fail_invalid_access();
+  }
+
+  out_code = filesys_remove(filename);
+  return out_code;
 }
