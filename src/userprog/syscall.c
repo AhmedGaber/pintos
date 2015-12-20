@@ -20,6 +20,7 @@ static int fail_invalid_access(void);
 void sys_halt (void);
 void sys_exit (int status);
 pid_t sys_exec (const char *cmdline);
+int sys_wait(pid_t pid);
 bool sys_write(int fd, const void *buffer, unsigned size, int* ret);
 
 
@@ -77,6 +78,16 @@ syscall_handler (struct intr_frame *f)
   }
 
   case SYS_WAIT:
+  {
+    pid_t pid;
+    if (memread(f->esp + 4, &pid, sizeof(pid_t)) == -1)
+      fail_invalid_access(); // invalid memory access attampet.
+
+    int ret = sys_wait(pid);
+    f->eax = (uint32_t) ret;
+    break;
+  }
+
   case SYS_CREATE:
   case SYS_REMOVE:
   case SYS_OPEN:
@@ -205,7 +216,7 @@ sys_exit(int status)
 pid_t
 sys_exec(const char *cmdline)
 {
-   printf("DEBUG >>> Exec : %s\n.", cmdline);
+   printf("DEBUG >>> Exec : %s.\n", cmdline);
    while(true);
 
    // cmdline is the address to the character buffer on user memory
@@ -219,6 +230,21 @@ sys_exec(const char *cmdline)
    return child_tid;
 }
 
+/**
+* Waits for a child process pid and retrieves the child’s exit status.
+*/
+int
+sys_wait(pid_t pid)
+{
+  printf ("DEBUG >>> Wait : %d.\n", pid);
+  return process_wait(pid); // in process.c
+}
+
+/**
+* Writes size bytes from buffer to the open file fd. Returns the number of
+* bytes actually written, which may be less than size if some
+* bytes could not be written.
+*/
 bool
 sys_write(int fd, const void *buffer, unsigned size, int* ret)
 {
