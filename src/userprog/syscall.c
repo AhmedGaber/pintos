@@ -12,9 +12,9 @@
 #include "filesys/file.h"
 #include "threads/palloc.h"
 #include "threads/synch.h"
+#include "lib/kernel/list.h"
 
 typedef uint32_t pid_t;
-
 struct lock filesys_lock;
 
 static void syscall_handler (struct intr_frame *);
@@ -22,6 +22,7 @@ static int memread (void *src, void *des, size_t bytes);
 static int32_t get_user (const uint8_t *uaddr);
 static bool put_user (uint8_t *udst, uint8_t byte);
 static int fail_invalid_access(void);
+static struct file_desc* get_file_desc(int fd);
 
 void sys_halt (void);
 void sys_exit (int status);
@@ -30,6 +31,9 @@ int sys_wait(pid_t pid);
 bool sys_write(int fd, const void *buffer, unsigned size, int* ret);
 bool sys_create(const char* filename, unsigned initial_size);
 bool sys_remove(const char* filename);
+int sys_open(const char* file);
+void sys_close(int fd);
+int sys_filesize(int fd);
 
 
 void
@@ -125,7 +129,28 @@ syscall_handler (struct intr_frame *f)
   }
 
   case SYS_OPEN:
+  {
+    const char* filename;
+    int out_code;
+
+    if (memread(f->esp + 4, &filename, sizeof(filename)) == -1)
+      fail_invalid_access(); // invalid memory access attampet.
+    out_code = sys_open(filename);
+    f->eax = out_code;
+    break;
+  }
+
   case SYS_FILESIZE:
+  {
+    int fd, out_code;
+    if (memread(f->esp + 4, &fd, sizeof(fd)) == -1)
+      fail_invalid_access(); // invalid memory access attampet.
+
+    out_code = sys_filesize(fd);
+    f->eax = out_code;
+    break;
+  }
+
   case SYS_READ:
   case SYS_WRITE:
   {
@@ -146,6 +171,14 @@ syscall_handler (struct intr_frame *f)
   case SYS_SEEK:
   case SYS_TELL:
   case SYS_CLOSE:
+  {
+    int fd;
+    if (memread(f->esp + 4, &fd, sizeof(fd)) == -1)
+      fail_invalid_access(); // invalid memory access attampet.
+
+    sys_close(fd);
+    break;
+  }
 
   /* unhandled case */
   default:
@@ -215,9 +248,36 @@ memread (void *src, void *dst, size_t bytes)
 /**
 * Failier-handler function in case of invalid memory access attampet.
 */
-static int fail_invalid_access(void) {
+static int
+fail_invalid_access(void)
+{
   sys_exit (-1);
   NOT_REACHED();
+}
+
+/**
+* Takes a file id ,and returns it's descriptor. Returns NULL otherwise.
+*/
+static struct file_desc*
+get_file_desc(int fd)
+{
+  struct thread* current = thread_current();
+  struct file* output_file;
+  int i;
+  struct list_elem *e = list_begin(&current->file_descriptors) ;
+  if (fd < 3) {
+    return NULL;
+  }
+
+  for(i = 3; i < fd; i++){
+    if (e == NULL)
+      return NULL;
+    e = list_next(e);
+  }
+
+  struct file_desc *file_des = list_entry(e, struct file_desc, elem);
+
+  return file_des;
 }
 
 /**
@@ -272,6 +332,60 @@ sys_wait(pid_t pid)
 {
   printf ("DEBUG >>> Wait : %d.\n", pid);
   return process_wait(pid); // in process.c
+}
+
+/**
+* Opens the file called file. Returns a nonnegative integer handle called
+* "file descriptor" (fd), or -1 if the file could not be opened.
+*/
+int
+sys_open(const char* file)
+{
+  struct file* opened_file;
+  struct file_desc* fd = palloc_get_page(0);
+
+  if (get_user((const uint8_t*) file) == -1) {
+    return fail_invalid_access();
+  }
+
+  opened_file = filesys_open(file);
+  if (!opened_file)
+    return -1;
+
+  fd->file = opened_file;
+
+  struct list* fd_list = &thread_current()->file_descriptors;
+  if (list_empty(fd_list)) {
+    // 0, 1, 2 are reserved for STDIN, STDOUT, STDERR (from the manual).
+    fd->id = 3;
+  }
+  else {
+    fd->id = (list_entry(list_back(fd_list), struct file_desc, elem)->id) + 1;
+  }
+  list_push_back(fd_list, &(fd->elem));
+
+  return fd->id;
+}
+
+/**
+* Returns the size, in bytes, of the file open as fd.
+*/
+int
+sys_filesize(int fd)
+{
+  struct file_desc* descriptor;
+
+  if (get_user((const uint8_t*) fd) == -1) {
+    fail_invalid_access();
+  }
+
+  descriptor = get_file_desc(fd);
+
+  if(descriptor == NULL) {
+    return -1;
+  }
+
+  return file_length(descriptor->file);
 }
 
 /**
@@ -332,4 +446,24 @@ sys_remove(const char* filename)
   out_code = filesys_remove(filename);
   lock_release(&filesys_lock);
   return out_code;
+}
+
+/**
+* Closes file descriptor fd. Exiting or terminating a process implicitly closes
+* all its open file descriptors, as if by calling this function for each one.
+*/
+void
+sys_close(int fd)
+{
+  struct file_desc* file_d = get_file_desc(fd);
+
+  if (get_user((const uint8_t*) fd) == -1) {
+    fail_invalid_access();
+  }
+
+  if(file_d && file_d->file) {
+    file_close(file_d->file);
+    list_remove(&(file_d->elem));
+    palloc_free_page(file_d);
+   }
 }
