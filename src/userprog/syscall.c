@@ -11,8 +11,11 @@
 #include "filesys/filesys.h"
 #include "filesys/file.h"
 #include "threads/palloc.h"
+#include "threads/synch.h"
 
 typedef uint32_t pid_t;
+
+struct lock filesys_lock;
 
 static void syscall_handler (struct intr_frame *);
 static int memread (void *src, void *des, size_t bytes);
@@ -32,6 +35,7 @@ bool sys_remove(const char* filename);
 void
 syscall_init (void)
 {
+  lock_init(&filesys_lock);
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
@@ -308,7 +312,9 @@ sys_create(const char* filename, unsigned initial_size)
   if (get_user((const uint8_t*) filename) == -1) {  //validation
     return fail_invalid_access();
   }
+  lock_acquire(&filesys_lock);
   out_code = filesys_create(filename, initial_size);
+  lock_release(&filesys_lock);
   return out_code;
 }
 
@@ -322,7 +328,8 @@ sys_remove(const char* filename)
   if (get_user((const uint8_t*) filename) == -1) {  //validation
     return fail_invalid_access();
   }
-
+  lock_acquire(&filesys_lock);
   out_code = filesys_remove(filename);
+  lock_release(&filesys_lock);
   return out_code;
 }
