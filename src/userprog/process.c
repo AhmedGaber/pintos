@@ -372,7 +372,6 @@ void arguments_push (void **esp , const char* file_name, char** save_ptr, int cn
   *esp -= sizeof(void *);
   memcpy(*esp, &argv[cnt], sizeof(void *));
 
-  free (token);
   free (argv);
 }
 
