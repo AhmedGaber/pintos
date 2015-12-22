@@ -657,6 +657,10 @@ init_thread (struct thread *t, const char *name, int priority)
   list_init (&(t->donors));
   t->sleep_endtick = 0;
 
+  #ifdef USERPROG
+    list_init(&t->file_descriptors);
+  #endif
+
 /* Set thread nice value. */
   if(t == initial_thread) // parent thread
   {
