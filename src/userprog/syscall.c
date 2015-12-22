@@ -24,17 +24,19 @@ static bool put_user (uint8_t *udst, uint8_t byte);
 static int fail_invalid_access(void);
 static struct file_desc* get_file_desc(struct thread *, int fd);
 
-void sys_halt (void);
-void sys_exit (int status);
-pid_t sys_exec (const char *cmdline);
-int sys_wait(pid_t pid);
-int sys_read(int fd, void *buffer, unsigned size);
-bool sys_write(int fd, const void *buffer, unsigned size, int* ret);
-bool sys_create(const char* filename, unsigned initial_size);
-bool sys_remove(const char* filename);
-int sys_open(const char* file);
-void sys_close(int fd);
-int sys_filesize(int fd);
+void halt (void);
+void exit (int status);
+pid_t exec (const char *cmdline);
+int wait(pid_t pid);
+int read(int fd, void *buffer, unsigned size);
+bool write(int fd, const void *buffer, unsigned size, int* ret);
+bool create(const char* filename, unsigned initial_size);
+bool remove(const char* filename);
+int open(const char* file);
+void close(int fd);
+int filesize(int fd);
+void seek(int fd, unsigned position);
+unsigned tell(int fd);
 
 
 void
@@ -64,7 +66,7 @@ syscall_handler (struct intr_frame *f)
 
   case SYS_HALT:
   {
-    sys_halt();
+    halt();
     NOT_REACHED();
     break;
   }
@@ -75,7 +77,7 @@ syscall_handler (struct intr_frame *f)
     if (memread(f->esp + 4, &exitcode, sizeof(exitcode)) == -1)
       fail_invalid_access(); // invalid memory access attampet.
 
-    sys_exit(exitcode);
+    exit(exitcode);
     NOT_REACHED();
     break;
   }
@@ -86,7 +88,7 @@ syscall_handler (struct intr_frame *f)
     if (memread(f->esp + 4, &cmdline, sizeof(cmdline)) == -1)
       fail_invalid_access(); // invalid memory access attampet.
 
-    int out_code = sys_exec((const char*) cmdline);
+    int out_code = exec((const char*) cmdline);
     f->eax = (uint32_t) out_code;
     break;
   }
@@ -97,7 +99,7 @@ syscall_handler (struct intr_frame *f)
     if (memread(f->esp + 4, &pid, sizeof(pid_t)) == -1)
       fail_invalid_access(); // invalid memory access attampet.
 
-    int ret = sys_wait(pid);
+    int ret = wait(pid);
     f->eax = (uint32_t) ret;
     break;
   }
@@ -112,7 +114,7 @@ syscall_handler (struct intr_frame *f)
     if (memread(f->esp + 8, &initial_size, sizeof(initial_size)) == -1)
       fail_invalid_access(); // invalid memory access attampet.
 
-    out_code = sys_create(filename, initial_size);
+    out_code = create(filename, initial_size);
     f->eax = out_code;
     break;
   }
@@ -124,7 +126,7 @@ syscall_handler (struct intr_frame *f)
     if (memread(f->esp + 4, &filename, sizeof(filename)) == -1)
       fail_invalid_access(); // invalid memory access attampet.
 
-    out_code = sys_remove(filename);
+    out_code = remove(filename);
     f->eax = out_code;
     break;
   }
@@ -136,7 +138,7 @@ syscall_handler (struct intr_frame *f)
 
     if (memread(f->esp + 4, &filename, sizeof(filename)) == -1)
       fail_invalid_access(); // invalid memory access attampet.
-    out_code = sys_open(filename);
+    out_code = open(filename);
     f->eax = out_code;
     break;
   }
@@ -147,7 +149,7 @@ syscall_handler (struct intr_frame *f)
     if (memread(f->esp + 4, &fd, sizeof(fd)) == -1)
       fail_invalid_access(); // invalid memory access attampet.
 
-    out_code = sys_filesize(fd);
+    out_code = filesize(fd);
     f->eax = out_code;
     break;
   }
@@ -162,7 +164,7 @@ syscall_handler (struct intr_frame *f)
     if(memread(f->esp + 8, &buffer, 4) == -1) fail_invalid_access();
     if(memread(f->esp + 12, &size, 4) == -1) fail_invalid_access();
 
-    out_code = sys_read(fd, buffer, size);
+    out_code = read(fd, buffer, size);
     f->eax = (uint32_t) out_code;
     break;
   }
@@ -177,20 +179,42 @@ syscall_handler (struct intr_frame *f)
     if (memread(f->esp + 8, &buffer, 4) == -1) fail_invalid_access();
     if (memread(f->esp + 12, &size, 4) == -1) fail_invalid_access();
 
-    out_code = sys_write(fd, buffer, size);
+    out_code = write(fd, buffer, size);
     f->eax = (uint32_t) out_code;
     break;
   }
 
   case SYS_SEEK:
+  {
+    int fd;
+    unsigned position;
+
+    if(memread(f->esp + 4, &fd, sizeof fd) == -1) fail_invalid_access();
+    if(memread(f->esp + 8, &position, sizeof position) == -1) fail_invalid_access();
+
+    seek(fd, position);
+    break;
+  }
+
   case SYS_TELL:
+  {
+    int fd;
+    unsigned out_code;
+
+    if(memread(f->esp + 4, &fd, 4) == -1) fail_invalid_access();
+
+    out_code = tell(fd);
+    f->eax = (uint32_t) out_code;
+    break;
+  }
+
   case SYS_CLOSE:
   {
     int fd;
     if (memread(f->esp + 4, &fd, sizeof(fd)) == -1)
       fail_invalid_access(); // invalid memory access attampet.
 
-    sys_close(fd);
+    close(fd);
     break;
   }
 
@@ -265,7 +289,7 @@ memread (void *src, void *dst, size_t bytes)
 static int
 fail_invalid_access(void)
 {
-  sys_exit (-1);
+  exit (-1);
   NOT_REACHED();
 }
 
@@ -303,7 +327,7 @@ get_file_desc(struct thread *t, int fd)
 * ‘devices/shutdown.h’).
 */
 void
-sys_halt(void)
+halt(void)
 {
   shutdown_power_off(); // from devices/shutdown.h
 }
@@ -313,7 +337,7 @@ sys_halt(void)
 * process’s parent waits for it, this is the status that will be returned.
 */
 void
-sys_exit(int status)
+exit(int status)
 {
   printf("%s: exit(%d)\n", thread_current()->name, status);
 
@@ -326,7 +350,7 @@ sys_exit(int status)
 * given arguments, and returns the new process’s program id (pid).
 */
 pid_t
-sys_exec(const char *cmdline)
+exec(const char *cmdline)
 {
    printf("DEBUG >>> Exec : %s.\n", cmdline);
    while(true);
@@ -346,7 +370,7 @@ sys_exec(const char *cmdline)
 * Waits for a child process pid and retrieves the child’s exit status.
 */
 int
-sys_wait(pid_t pid)
+wait(pid_t pid)
 {
   printf ("DEBUG >>> Wait : %d.\n", pid);
   return process_wait(pid); // in process.c
@@ -357,7 +381,7 @@ sys_wait(pid_t pid)
 * "file descriptor" (fd), or -1 if the file could not be opened.
 */
 int
-sys_open(const char* file)
+open(const char* file)
 {
   struct file* opened_file;
   struct file_desc* fd = palloc_get_page(0);
@@ -389,7 +413,7 @@ sys_open(const char* file)
 * Returns the size, in bytes, of the file open as fd.
 */
 int
-sys_filesize(int fd)
+filesize(int fd)
 {
   struct file_desc* descriptor;
 
@@ -412,7 +436,7 @@ sys_filesize(int fd)
 * be read (due to a condition other than end of file).
 */
 int
-sys_read(int fd, void *buffer, unsigned size)
+read(int fd, void *buffer, unsigned size)
 {
 
   if (get_user((const uint8_t*) buffer) == -1) {
@@ -444,7 +468,7 @@ sys_read(int fd, void *buffer, unsigned size)
 * bytes could not be written.
 */
 int
-sys_write(int fd, const void *buffer, unsigned size)
+write(int fd, const void *buffer, unsigned size)
 {
    // Validation
    if (get_user((const uint8_t*) buffer) == -1) {
@@ -472,7 +496,7 @@ sys_write(int fd, const void *buffer, unsigned size)
 * Returns true if successful, false otherwise.
 */
 bool
-sys_create(const char* filename, unsigned initial_size)
+create(const char* filename, unsigned initial_size)
 {
   bool out_code;
   if (get_user((const uint8_t*) filename) == -1) {  //validation
@@ -488,7 +512,7 @@ sys_create(const char* filename, unsigned initial_size)
 * Deletes the file called file. Returns true if successful, false otherwise.
 */
 bool
-sys_remove(const char* filename)
+remove(const char* filename)
 {
   bool out_code;
   if (get_user((const uint8_t*) filename) == -1) {  //validation
@@ -501,11 +525,44 @@ sys_remove(const char* filename)
 }
 
 /**
+* Changes the next byte to be read or written in open file fd to position,
+* expressed in bytes from the beginning of the file.
+* (Thus, a position of 0 is the file's start.)
+*/
+void
+seek(int fd, unsigned position)
+{
+  struct file_desc* file_d = get_file_desc(thread_current(), fd);
+
+  if(file_d && file_d->file) {
+    file_seek(file_d->file, position);
+  }
+  else
+    return;
+}
+
+/**
+* Returns the position of the next byte to be read or written in open file fd,
+* expressed in bytes from the beginning of the file.
+*/
+unsigned
+tell(int fd)
+{
+  struct file_desc* file_d = get_file_desc(thread_current(), fd);
+
+  if(file_d && file_d->file) {
+    return file_tell(file_d->file);
+  }
+  else
+    return -1;
+}
+
+/**
 * Closes file descriptor fd. Exiting or terminating a process implicitly closes
 * all its open file descriptors, as if by calling this function for each one.
 */
 void
-sys_close(int fd)
+close(int fd)
 {
   struct file_desc* file_d = get_file_desc(thread_current(), fd);
 
