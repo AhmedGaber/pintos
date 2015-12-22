@@ -88,11 +88,7 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED)
 {
-
-  // Temporary implementation as the manual suggested.
-  while (1){ // an infinite loop
-
-  }
+  while(true);
   return -1;
 }
 
@@ -226,6 +222,18 @@ load (const char *file_name, void (**eip) (void), void **esp)
     goto done;
   process_activate ();
 
+  char* tmp_cmd_line = (char*) malloc(strlen(file_name) + 1);
+  strlcpy(tmp_cmd_line, file_name, strlen(file_name) + 1);
+
+  char* save_ptr;
+  tmp_cmd_line = strtok_r(tmp_cmd_line, " ", &save_ptr);
+  int cnt = 1;
+  while (strtok_r(NULL, " ", &save_ptr) != NULL)
+    cnt++;
+  free(tmp_cmd_line);
+
+  file_name = strtok_r(file_name, " ", &save_ptr);
+
   /* Open executable file. */
   file = filesys_open (file_name);
   if (file == NULL)
@@ -310,7 +318,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
   if (!setup_stack (esp))
     goto done;
 
+  arguments_push (esp , file_name, &save_ptr, cnt);
+
   /* Start address. */
+
   *eip = (void (*) (void)) ehdr.e_entry;
 
   success = true;
@@ -320,6 +331,51 @@ load (const char *file_name, void (**eip) (void), void **esp)
   file_close (file);
   return success;
 }
+
+void arguments_push (void **esp , const char* file_name, char** save_ptr, int cnt) {
+  char** argv = malloc((cnt + 1) * sizeof(char *));
+  char* token;
+  int i = 0, tot = 0;
+
+  for (token = (char *) file_name; token != NULL;
+    token = strtok_r(NULL, " ", save_ptr)) {
+    int len = strlen(token) + 1;
+    tot += len;
+    *esp -= len;
+    argv[i++] = *esp;
+    memcpy(*esp, token, strlen(token) + 1);
+  }
+  argv[cnt] = 0;
+
+  // word-align
+  if (tot % 4 != 0) {
+    uint8_t to_add = (uint8_t) (4 - (tot % 4));
+    *esp -= to_add;
+    memcpy(*esp, &argv[cnt], to_add);
+  }
+
+  for (i = cnt; i >= 0; i--) {
+    *esp -= sizeof(char *);
+    memcpy(*esp, &argv[i], sizeof(char *));
+  }
+
+  // argv
+  token = *esp;
+  *esp -= sizeof(char **);
+  memcpy(*esp, &token, sizeof(char **));
+
+  // argc
+  *esp -= sizeof(int);
+  memcpy(*esp, &cnt, sizeof(int));
+
+  // return address
+  *esp -= sizeof(void *);
+  memcpy(*esp, &argv[cnt], sizeof(void *));
+
+  free (token);
+  free (argv);
+}
+
 
 /* load() helpers. */
 
@@ -442,7 +498,7 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = PHYS_BASE - 12;
+        *esp = PHYS_BASE;
       else
         palloc_free_page (kpage);
     }

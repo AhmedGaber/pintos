@@ -29,7 +29,7 @@ void exit (int status);
 pid_t exec (const char *cmdline);
 int wait(pid_t pid);
 int read(int fd, void *buffer, unsigned size);
-bool write(int fd, const void *buffer, unsigned size, int* ret);
+int write(int fd, const void *buffer, unsigned size);
 bool create(const char* filename, unsigned initial_size);
 bool remove(const char* filename);
 int open(const char* file);
