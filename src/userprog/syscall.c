@@ -336,34 +336,25 @@ halt(void)
 * Terminates the current user program, returning status to the kernel. If the
 * process’s parent waits for it, this is the status that will be returned.
 */
-void
-exit(int status)
-{
-  printf("%s: exit(%d)\n", thread_current()->name, status);
-
-  // TODO
-  fail_invalid_access();
+void exit (int status) {
+  printf ("%s: exit(%d)\n", thread_current()->name, status);
+  thread_exit();
 }
 
 /**
 * Runs the executable whose name is given in cmd line, passing any
 * given arguments, and returns the new process’s program id (pid).
 */
-pid_t
-exec(const char *cmdline)
-{
-   printf("DEBUG >>> Exec : %s.\n", cmdline);
-   while(true);
+pid_t exec (const char * cmd_line) {
+  pid_t child_tid = process_execute(cmd_line);
+  struct child_process* cp = get_child_process(child_tid);
+  if (cp->loaded == 0) {
+    sema_down(&cp->wait_load);
+  }
+  if (cp->loaded == -1)
+      return ERROR;
 
-   // cmdline is the address to the character buffer on user memory
-   // validation check is required
-   if (get_user((const uint8_t*) cmdline) == -1) {
-     fail_invalid_access();  // invalid memory access attampet
-     return -1;
-   }
-
-   tid_t child_tid = process_execute(cmdline);
-   return child_tid;
+  return child_tid;
 }
 
 /**
