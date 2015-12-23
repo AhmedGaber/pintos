@@ -111,6 +111,8 @@ struct thread
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
     struct list file_descriptors;       /* List of the file_descriptors owend by this thread */
+    struct list childs;
+    struct child_process* parent_child_list;
 #endif
 
     /* Owned by thread.c. */
