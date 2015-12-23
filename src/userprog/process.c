@@ -14,12 +14,15 @@
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
+#include "threads/malloc.h"
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -60,7 +63,13 @@ start_process (void *file_name_)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
-
+  struct child_process* cp = thread_current()->parent_child_list;
+  if (success) {
+    cp->loaded = 1;
+  } else {
+    cp->loaded = -1;
+  }
+  sema_up(cp->wait_load);
   /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success)
@@ -76,6 +85,21 @@ start_process (void *file_name_)
   NOT_REACHED ();
 }
 
+void remove_child_process (tid_t tid) {
+  struct thread *t = thread_current();
+  struct list_elem *e;
+
+  for (e = list_begin (&t->childs); e != list_end (&t->childs);
+       e = list_next (e))
+        {
+          struct child_process *cp = list_entry (e, struct child_process, elem);
+          if (tid == cp->pid) {
+            list_remove(&cp->elem);
+	          return;
+	        }
+        }
+}
+
 /* Waits for thread TID to die and returns its exit status.  If
    it was terminated by the kernel (i.e. killed due to an
    exception), returns -1.  If TID is invalid or if it was not a
@@ -88,8 +112,16 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED)
 {
-  while(true);
-  return -1;
+  struct child_process* cp = get_child_process(child_tid);
+  if (cp == NULL || cp->wait) {
+    return -1;
+  }
+  if (!cp->exited) {
+    sema_down(&cp->waiting);
+  }
+  int exit_state = cp->exit_state;
+  remove_child_process(child_tid);
+  return exit_state;
 }
 
 /* Free the current process's resources. */
@@ -99,9 +131,15 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
+  if(cur->parent_child_list != NULL){
+        cur->parent_child_list->exited = true;
+        sema_up(&cur->parent_child_list->waiting);
+  }
+
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
+  
   if (pd != NULL)
     {
       /* Correct ordering here is crucial.  We must set
@@ -321,7 +359,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
   arguments_push (esp , file_name, &save_ptr, cnt);
 
   /* Start address. */
-
   *eip = (void (*) (void)) ehdr.e_entry;
 
   success = true;
@@ -374,7 +411,6 @@ void arguments_push (void **esp , const char* file_name, char** save_ptr, int cn
 
   free (argv);
 }
-
 
 /* load() helpers. */
 
