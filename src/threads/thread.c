@@ -259,6 +259,9 @@ thread_create (const char *name, int priority,
   sf = alloc_frame (t, sizeof *sf);
   sf->eip = switch_entry;
   sf->ebp = 0;
+  
+  struct child_process* ptr = add_child(trd->tid);
+  t->parent_child_list = ptr;
 
   intr_set_level (old_level);
 
@@ -266,6 +269,19 @@ thread_create (const char *name, int priority,
   thread_unblock (t);
 
   return tid;
+}
+
+struct child_process* add_child(int pid) {
+  struct child_process* cp = malloc(sizeof(struct child_process));
+  cp->pid = pid;
+  cp->loaded = 0;
+  cp->wait = false;
+  cp->exited = false;
+  cp->exit_state = -1;
+  sema_init(&cp->wait_load,0);
+  sema_init(&cp->waiting,0);
+  list_push_back(&thread_current()->childs,&cp->elem);
+  return cp;
 }
 
 /* Make the current thread sleep until the timer ticks
@@ -659,6 +675,7 @@ init_thread (struct thread *t, const char *name, int priority)
 
   #ifdef USERPROG
     list_init(&t->file_descriptors);
+    list_init(&t->childs);
   #endif
 
 /* Set thread nice value. */
