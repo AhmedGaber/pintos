@@ -4,7 +4,6 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
-#include "lib/kernel/hash.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -24,16 +23,6 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
-
-/* Niceness */
-#define NICE_MAX 20
-#define NICE_MIN -20
-
-struct donation {
-  int donated_priority;
-  struct lock *loc;
-  struct list_elem delem;
-};
 
 /* A kernel thread or user process.
 
@@ -100,12 +89,9 @@ struct thread
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
     struct list_elem allelem;           /* List element for all threads list. */
-    struct list_elem waitelem;          /* List element, stored in the wait_list. */
-    int64_t sleep_endtick;              /* Used if the thread is sleep, the thread should awake after this tick */
-    struct list donors;
-    struct lock *blocked_on;
+
     /* Shared between thread.c and synch.c. */
-    struct list_elem elem;              /* List element. */
+    struct list_elem elem;    /* List element. */
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -117,11 +103,6 @@ struct thread
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
-
-    /* Advanced Scheduler */
-    int nice; /* How *nice*  is this thread to other threads. */
-    int recent_cpu; /* time spent by this thread on the CPU */
-
   };
 
 /* If false (default), use round-robin scheduler.
@@ -132,7 +113,7 @@ extern bool thread_mlfqs;
 void thread_init (void);
 void thread_start (void);
 
-void thread_tick (int64_t tick);
+void thread_tick (void);
 void thread_print_stats (void);
 
 typedef void thread_func (void *aux);
@@ -140,11 +121,6 @@ tid_t thread_create (const char *name, int priority, thread_func *, void *);
 
 void thread_block (void);
 void thread_unblock (struct thread *);
-
-int get_priority(struct thread *);
-int get_max_priority (void);
-
-void thread_sleep_for_ticks (int64_t wake_tick);
 
 struct thread *thread_current (void);
 tid_t thread_tid (void);
@@ -164,14 +140,5 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
-
-struct thread *priority_schedule_next_thread(void);
-
-/* For mlfqs */
-void calculate_priority (struct thread *t, void* aux);
-void calculate_recent_cpu (struct thread *t, void* aux);
-void update_load_avg(void);
-int count_ready_threads(void);
-
 
 #endif /* threads/thread.h */
