@@ -4,17 +4,9 @@
 #include <list.h>
 
 void syscall_init (void);
-
-struct child_process{
-  pid_t pid;
-  struct list_elem elem;
-  struct semaphore wait_load;
-  struct semaphore waiting;
-  int loaded;
-  bool exited;
-  bool wait;
-  int exit_state;
-}
+void valid_ptr(const void *);
+void memory_read (void*, void*,size_t);
+struct file_desc* get_file_desc (int);
 
 struct file_desc {
   int id;
