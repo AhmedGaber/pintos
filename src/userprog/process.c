@@ -1,4 +1,6 @@
 #include "userprog/process.h"
+#include "userprog/syscall.h"
+#include <list.h>
 #include <debug.h>
 #include <inttypes.h>
 #include <round.h>
@@ -18,7 +20,6 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
-
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -41,8 +42,10 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
+  char* save_ptr;
+
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (strtok_r((char *)file_name, " ", &save_ptr), PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy);
   return tid;
@@ -69,7 +72,7 @@ start_process (void *file_name_)
   } else {
     cp->loaded = -1;
   }
-  sema_up(cp->wait_load);
+  sema_up(&cp->wait_load);
   /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success)
@@ -83,6 +86,22 @@ start_process (void *file_name_)
      and jump to it. */
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
+}
+
+struct child_process* get_child_process (pid_t pid)
+{
+  struct thread *t = thread_current();
+  struct list_elem *e;
+
+  for (e = list_begin (&t->childs); e != list_end (&t->childs);
+       e = list_next (e))
+        {
+          struct child_process *cp = list_entry(e, struct child_process, elem);
+          if (pid == cp->pid) {
+	          return cp;
+	        }
+        }
+  return NULL;
 }
 
 void remove_child_process (tid_t tid) {
@@ -129,17 +148,23 @@ void
 process_exit (void)
 {
   struct thread *cur = thread_current ();
-  uint32_t *pd;
 
   if(cur->parent_child_list != NULL){
         cur->parent_child_list->exited = true;
         sema_up(&cur->parent_child_list->waiting);
   }
+  free_rescources();
+  if (cur->tid == 1) {
+    return;
+  }
+  uint32_t *pd;
+  printf ("%s: exit(%d)\n", thread_current()->name, thread_current()->parent_child_list->exit_state);
+
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
-  
+
   if (pd != NULL)
     {
       /* Correct ordering here is crucial.  We must set
@@ -153,6 +178,49 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+}
+void remove_child_processes ()
+{
+  struct thread *t = thread_current();
+  struct list_elem *next, *e = list_begin(&t->childs);
+
+  while (e != list_end (&t->childs))
+    {
+      next = list_next(e);
+      struct child_process *cp = list_entry (e, struct child_process,
+					     elem);
+      list_remove(&cp->elem);
+      free(cp);
+      e = next;
+    }
+}
+void process_close (int fd)
+{
+  if (get_file_desc(fd) != NULL){
+    struct file_desc *fd_entry = get_file_desc(fd);
+    file_close(fd_entry->file);
+    list_remove(&fd_entry->elem);
+    free(fd_entry);
+  }
+}
+void process_close_all()
+{
+  struct list *fd_table = &thread_current()->file_descriptors;
+  struct list_elem *e = list_begin (fd_table);
+  while (e != list_end (fd_table))
+    {
+      struct file_desc *tmp = list_entry (e, struct file_desc, elem);
+      e = list_next (e);
+      process_close(tmp->id);
+    }
+}
+void free_rescources() {
+  file_close(thread_current()->exe);
+  // struct thread *cur = thread_current ();
+  // //close all descriptors
+  // process_close_all();
+  // cur->parent_child_list = NULL;
+  // remove_child_processes();
 }
 
 /* Sets up the CPU for running user code in the current
@@ -270,7 +338,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
     cnt++;
   free(tmp_cmd_line);
 
-  file_name = strtok_r(file_name, " ", &save_ptr);
+  file_name = strtok_r((char *) file_name, " ", &save_ptr);
 
   /* Open executable file. */
   file = filesys_open (file_name);
@@ -365,7 +433,12 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
+  if (success) {
+    thread_current()->exe = file;
+    file_deny_write(file);
+  } else {
+    file_close(file);
+  }
   return success;
 }
 
@@ -398,8 +471,8 @@ void arguments_push (void **esp , const char* file_name, char** save_ptr, int cn
 
   // argv
   token = *esp;
-  *esp -= sizeof(char **);
-  memcpy(*esp, &token, sizeof(char **));
+  *esp -= sizeof(char *);
+  memcpy(*esp, &token, sizeof(char *));
 
   // argc
   *esp -= sizeof(int);
@@ -558,4 +631,17 @@ install_page (void *upage, void *kpage, bool writable)
      address, then map our page there. */
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
+struct child_process* add_child(int pid){
+  struct child_process* cp = malloc(sizeof(struct child_process));
+  cp->pid = pid;
+  cp->loaded = 0;
+  cp->wait = false;
+  cp->exited = false;
+  cp->exit_state = -1;
+  sema_init(&cp->wait_load,0);
+  sema_init(&cp->waiting,0);
+  list_push_back(&thread_current()->childs,&cp->elem);
+  return cp;
 }
