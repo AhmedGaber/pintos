@@ -99,6 +99,7 @@ struct thread
     struct list file_descriptors;       /* List of the file_descriptors owend by this thread */
     struct list childs;
     struct child_process* parent_child_list;
+    struct file *exe;
 #endif
 
     /* Owned by thread.c. */
