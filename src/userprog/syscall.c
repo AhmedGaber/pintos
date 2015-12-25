@@ -322,7 +322,6 @@ pid_t exec (const char * cmd_line) {
   }
   if (cp != NULL && cp->loaded == -1)
       return ERROR;
-
   return child_tid;
 }
 
@@ -384,14 +383,10 @@ int filesize (int fd) {
 
 int read (int fd , void * buffer , unsigned size) {
   if (fd == STDIN_FILENO) {
-    lock_acquire(&filesys_lock);
     unsigned i;
-    for(i = 0; i < size; i++) {
-        if(! put_user(buffer + i, input_getc()) ) {
-          lock_release (&filesys_lock);
-          return -1;
-        }
-      }
+    for (i = 0; i < size; i++) {
+      ((uint8_t *) buffer)[i] = input_getc();
+    }
     return size;
   }
 
@@ -408,25 +403,21 @@ int read (int fd , void * buffer , unsigned size) {
 }
 
 int write (int fd , const void * buffer , unsigned size) {
- lock_acquire (&filesys_lock);
- int ret;
+  if (fd == STDOUT_FILENO) {
+    putbuf(buffer, size);
+    return size;
+  }
 
- if(fd == STDOUT_FILENO) {
-   putbuf(buffer, size);
-   ret = size;
- }
- else {
-   struct file_desc* file_d = get_file_desc(fd);
+  struct file_desc* descriptor = get_file_desc(fd);
 
-   if(file_d && file_d->file) {
-     ret = file_write(file_d->file, buffer, size);
-   }
-   else
-     ret = -1;
- }
+  if (descriptor == NULL) {
+    return -1;
+  }
 
- lock_release (&filesys_lock);
- return ret;
+  lock_acquire(&filesys_lock);
+  int bytes = file_write (descriptor->file, buffer, size);
+  lock_release(&filesys_lock);
+  return bytes;
 }
 
 void seek (int fd , unsigned position) {
