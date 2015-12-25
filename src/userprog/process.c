@@ -72,11 +72,14 @@ start_process (void *file_name_)
   } else {
     cp->loaded = -1;
   }
-  sema_up(&cp->wait_load);
   /* If load failed, quit. */
   palloc_free_page (file_name);
-  if (!success)
+  if (!success){
+    sema_up(&cp->wait_load);
     thread_exit ();
+  }
+  sema_up(&cp->wait_load);
+
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
