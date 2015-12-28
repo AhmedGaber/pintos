@@ -166,6 +166,7 @@ tid_t
 thread_create (const char *name, int priority,
                thread_func *function, void *aux)
 {
+
   struct thread *t;
   struct kernel_thread_frame *kf;
   struct switch_entry_frame *ef;
@@ -203,10 +204,10 @@ thread_create (const char *name, int priority,
   sf = alloc_frame (t, sizeof *sf);
   sf->eip = switch_entry;
   sf->ebp = 0;
-
 #ifdef USERPROG
   struct child_process* ptr = add_child(t->tid);
   t->parent_child_list = ptr;
+
 #endif
 
   intr_set_level (old_level);
