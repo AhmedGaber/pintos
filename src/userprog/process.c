@@ -45,7 +45,14 @@ process_execute (const char *file_name)
   char* save_ptr;
 
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (strtok_r((char *)file_name, " ", &save_ptr), PRI_DEFAULT, start_process, fn_copy);
+  char name[20];
+  int i = 0;
+  for(;file_name[i]!= '\0'&& file_name[i]!= ' ';i++){
+    name[i]= file_name[i];
+  }
+  name[i]='\0';
+  tid = thread_create (name, PRI_DEFAULT, start_process, fn_copy);
+
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy);
   return tid;
@@ -116,6 +123,10 @@ void remove_child_process (tid_t tid) {
         {
           struct child_process *cp = list_entry (e, struct child_process, elem);
           if (tid == cp->pid) {
+            sema_try_down(&cp->wait_load);
+            sema_up(&cp->wait_load);
+            sema_try_down(&cp->waiting);
+            sema_up(&cp->waiting);
             list_remove(&cp->elem);
 	          return;
 	        }
@@ -182,7 +193,7 @@ process_exit (void)
       pagedir_destroy (pd);
     }
 }
-void remove_child_processes ()
+void remove_child_processes (void)
 {
   struct thread *t = thread_current();
   struct list_elem *next, *e = list_begin(&t->childs);
@@ -192,38 +203,35 @@ void remove_child_processes ()
       next = list_next(e);
       struct child_process *cp = list_entry (e, struct child_process,
 					     elem);
+      sema_try_down(&cp->wait_load);
+      sema_up(&cp->wait_load);
+      sema_try_down(&cp->waiting);
+      sema_up(&cp->waiting);
       list_remove(&cp->elem);
       free(cp);
       e = next;
     }
 }
-void process_close (int fd)
+
+
+void process_close_file ()
 {
-  if (get_file_desc(fd) != NULL){
-    struct file_desc *fd_entry = get_file_desc(fd);
-    file_close(fd_entry->file);
-    list_remove(&fd_entry->elem);
-    free(fd_entry);
-  }
-}
-void process_close_all()
-{
-  struct list *fd_table = &thread_current()->file_descriptors;
-  struct list_elem *e = list_begin (fd_table);
-  while (e != list_end (fd_table))
+  struct thread *t = thread_current();
+  struct list_elem *next, *e = list_begin(&t->file_descriptors);
+
+  while (e != list_end (&t->file_descriptors))
     {
-      struct file_desc *tmp = list_entry (e, struct file_desc, elem);
-      e = list_next (e);
-      process_close(tmp->id);
+      next = list_next(e);
+      struct file_desc *pf = list_entry (e, struct file_desc, elem);
+	    file_close(pf->file);
+	    list_remove(&pf->elem);
+      e = next;
     }
 }
 void free_rescources() {
+  remove_child_processes();
+  process_close_file();
   file_close(thread_current()->exe);
-  // struct thread *cur = thread_current ();
-  // //close all descriptors
-  // process_close_all();
-  // cur->parent_child_list = NULL;
-  // remove_child_processes();
 }
 
 /* Sets up the CPU for running user code in the current
